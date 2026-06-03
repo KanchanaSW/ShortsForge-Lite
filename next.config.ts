@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  transpilePackages: ["remotion", "@remotion/player", "@remotion/web-renderer"],
 };
 
 export default nextConfig;
