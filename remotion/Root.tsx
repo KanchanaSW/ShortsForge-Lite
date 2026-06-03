@@ -2,6 +2,7 @@ import { Composition } from "remotion";
 import type { ComponentType } from "react";
 import { ShortVideo } from "@/remotion/ShortVideo";
 import {
+  DEFAULT_SCENE_VISUALS,
   VIDEO_FPS,
   VIDEO_HEIGHT,
   VIDEO_WIDTH,
@@ -9,14 +10,20 @@ import {
 } from "@/lib/types";
 import { getDurationInFrames } from "@/lib/videoUtils";
 
+const defaultScene = {
+  text: "Your hook goes here.",
+  duration: 3,
+  ...DEFAULT_SCENE_VISUALS,
+};
+
 const defaultScript: ShortScript = {
   title: "ShortsForge Lite",
   scenes: [
-    { text: "Your hook goes here.", duration: 3 },
-    { text: "Scene two.", duration: 3 },
-    { text: "Scene three.", duration: 3 },
-    { text: "Scene four.", duration: 3 },
-    { text: "Scene five.", duration: 3 },
+    { ...defaultScene, text: "Your hook goes here.", visualQuery: "city lights night" },
+    { ...defaultScene, text: "Scene two.", visualQuery: "ocean waves sunset" },
+    { ...defaultScene, text: "Scene three.", visualQuery: "forest path morning" },
+    { ...defaultScene, text: "Scene four.", visualQuery: "coffee steam close" },
+    { ...defaultScene, text: "Scene five.", visualQuery: "stars sky timelapse" },
   ],
 };
 

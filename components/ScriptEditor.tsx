@@ -4,8 +4,8 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SceneRow } from "@/components/SceneRow";
-import type { ShortScript } from "@/lib/types";
-import { getTotalDurationSeconds } from "@/lib/videoUtils";
+import { DEFAULT_SCENE_VISUALS, type ShortScript } from "@/lib/types";
+import { getRawTotalDurationSeconds, getTotalDurationSeconds } from "@/lib/videoUtils";
 
 interface ScriptEditorProps {
   script: ShortScript;
@@ -29,7 +29,14 @@ export function ScriptEditor({ script, onChange }: ScriptEditorProps) {
     if (script.scenes.length >= MAX_SCENES) return;
     onChange({
       ...script,
-      scenes: [...script.scenes, { text: "New scene", duration: 3 }],
+      scenes: [
+        ...script.scenes,
+        {
+          text: "New scene",
+          duration: 3,
+          ...DEFAULT_SCENE_VISUALS,
+        },
+      ],
     });
   };
 
@@ -59,6 +66,8 @@ export function ScriptEditor({ script, onChange }: ScriptEditorProps) {
           <h3 className="text-sm font-medium">Scenes</h3>
           <p className="text-xs text-muted-foreground">
             {script.scenes.length} scenes · {totalDuration}s total
+            {getRawTotalDurationSeconds(script.scenes) > totalDuration &&
+              " (scaled to 60s max for Shorts)"}
           </p>
         </div>
         <Button
@@ -80,9 +89,23 @@ export function ScriptEditor({ script, onChange }: ScriptEditorProps) {
             index={index}
             scene={scene}
             canRemove={script.scenes.length > MIN_SCENES}
-            onTextChange={(i, text) => updateScene(i, { text })}
+            onTextChange={(i, text) =>
+              updateScene(i, {
+                text,
+                audioPath: undefined,
+                audioUrl: undefined,
+                audioStatus: undefined,
+              })
+            }
             onDurationChange={(i, duration) =>
               updateScene(i, { duration: Math.min(15, Math.max(1, duration)) })
+            }
+            onMoodChange={(i, mood) => updateScene(i, { mood })}
+            onVisualQueryChange={(i, visualQuery) =>
+              updateScene(i, { visualQuery, videoUrl: undefined })
+            }
+            onAccentColorChange={(i, accentColor) =>
+              updateScene(i, { accentColor })
             }
             onRemove={removeScene}
           />

@@ -5,15 +5,20 @@ import { Button } from "@/components/ui/button";
 
 interface RenderProgressProps {
   progress: number;
+  statusLabel?: string;
   onCancel: () => void;
 }
 
-export function RenderProgress({ progress, onCancel }: RenderProgressProps) {
+export function RenderProgress({
+  progress,
+  statusLabel = "Rendering video...",
+  onCancel,
+}: RenderProgressProps) {
   return (
     <div className="space-y-4 rounded-xl border border-border bg-surface p-6">
       <div className="space-y-2">
         <div className="flex items-center justify-between text-sm">
-          <span className="font-medium">Rendering video...</span>
+          <span className="font-medium">{statusLabel}</span>
           <span className="text-muted-foreground">{progress}%</span>
         </div>
         <Progress value={progress} />

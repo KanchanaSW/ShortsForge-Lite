@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { clearVideoBlobUrl, loadVideoBlobUrl } from "@/lib/storage";
+import { clearProject, loadVideoBlobUrl } from "@/lib/storage";
 
 export default function PreviewPage() {
   const router = useRouter();
@@ -28,7 +28,7 @@ export default function PreviewPage() {
   }, [router]);
 
   const handleCreateNew = () => {
-    clearVideoBlobUrl();
+    clearProject();
     router.push("/create");
   };
 

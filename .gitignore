@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated voiceover files
+public/audio/*.mp3
+!public/audio/.gitkeep

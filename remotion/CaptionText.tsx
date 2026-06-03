@@ -8,7 +8,16 @@ interface CaptionTextProps {
   translateY: number;
 }
 
+function captionFontSize(text: string): number {
+  const len = text.length;
+  if (len > 200) return 48;
+  if (len > 120) return 56;
+  return 72;
+}
+
 export function CaptionText({ text, opacity, translateY }: CaptionTextProps) {
+  const fontSize = captionFontSize(text);
+
   return (
     <AbsoluteFill
       style={{
@@ -22,7 +31,7 @@ export function CaptionText({ text, opacity, translateY }: CaptionTextProps) {
           opacity,
           transform: `translateY(${translateY}px)`,
           color: "#FFFFFF",
-          fontSize: 72,
+          fontSize,
           fontWeight: 800,
           lineHeight: 1.15,
           textAlign: "center",

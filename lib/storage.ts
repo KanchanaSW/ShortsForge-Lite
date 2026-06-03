@@ -1,4 +1,5 @@
-import type { ShortScript } from "@/lib/types";
+import { normalizeScene } from "@/lib/normalizeScene";
+import type { Scene, ShortScript } from "@/lib/types";
 
 const TOPIC_KEY = "shortsforge:lastTopic";
 const SCRIPT_KEY = "shortsforge:lastScript";
@@ -15,9 +16,24 @@ export function loadTopic(): string | null {
   return localStorage.getItem(TOPIC_KEY);
 }
 
+function scriptForStorage(script: ShortScript): ShortScript {
+  return {
+    title: script.title,
+    scenes: script.scenes.map(
+      ({ text, duration, mood, visualQuery, accentColor }) => ({
+        text,
+        duration,
+        mood,
+        visualQuery,
+        accentColor,
+      })
+    ),
+  };
+}
+
 export function saveScript(script: ShortScript): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(SCRIPT_KEY, JSON.stringify(script));
+  localStorage.setItem(SCRIPT_KEY, JSON.stringify(scriptForStorage(script)));
 }
 
 export function loadScript(): ShortScript | null {
@@ -25,7 +41,15 @@ export function loadScript(): ShortScript | null {
   const raw = localStorage.getItem(SCRIPT_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as ShortScript;
+    const parsed = JSON.parse(raw) as {
+      title: string;
+      scenes: Array<Partial<Scene> & { text: string; duration: number }>;
+    };
+    if (!parsed.title || !Array.isArray(parsed.scenes)) return null;
+    return {
+      title: parsed.title,
+      scenes: parsed.scenes.map(normalizeScene),
+    };
   } catch {
     return null;
   }
@@ -53,4 +77,11 @@ export function clearVideoBlobUrl(): void {
   }
   sessionStorage.removeItem(VIDEO_KEY);
   sessionStorage.removeItem(VIDEO_FILENAME_KEY);
+}
+
+export function clearProject(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(TOPIC_KEY);
+  localStorage.removeItem(SCRIPT_KEY);
+  clearVideoBlobUrl();
 }

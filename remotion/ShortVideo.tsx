@@ -1,7 +1,8 @@
 "use client";
 
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
-import { Background } from "@/remotion/Background";
+import { SceneAudio } from "@/remotion/SceneAudio";
+import { SceneBackground } from "@/remotion/SceneBackground";
 import { SceneRenderer } from "@/remotion/SceneRenderer";
 import type { ShortScript } from "@/lib/types";
 import { getSceneFrameRanges } from "@/lib/videoUtils";
@@ -22,15 +23,25 @@ export function ShortVideo({ title, scenes }: ShortVideoProps) {
 
   return (
     <AbsoluteFill>
-      <Background />
+      {frameRanges.map(({ startFrame, endFrame, scene }, index) => (
+        <SceneBackground
+          key={`bg-${index}-${scene.visualQuery}`}
+          mood={scene.mood}
+          accentColor={scene.accentColor}
+          videoUrl={scene.videoUrl}
+          startFrame={startFrame}
+          endFrame={endFrame}
+        />
+      ))}
       {frameRanges.map(({ startFrame, endFrame, scene }, index) => (
         <SceneRenderer
-          key={`${index}-${scene.text.slice(0, 20)}`}
+          key={`scene-${index}-${scene.text.slice(0, 20)}`}
           scene={scene}
           startFrame={startFrame}
           endFrame={endFrame}
         />
       ))}
+      <SceneAudio frameRanges={frameRanges} />
       <AbsoluteFill
         style={{
           justifyContent: "flex-end",
