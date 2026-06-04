@@ -24,7 +24,8 @@ export async function POST(request: Request) {
 
   const videoUrl = await getStockVideoUrl(
     parsed.data.query,
-    parsed.data.pickIndex ?? 0
+    parsed.data.pickIndex ?? 0,
+    parsed.data.orientation ?? "portrait"
   );
   if (!videoUrl) {
     return NextResponse.json(

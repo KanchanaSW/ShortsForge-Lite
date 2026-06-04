@@ -1,7 +1,9 @@
 "use client";
 
 import { memo } from "react";
-import { Trash2 } from "lucide-react";
+import { GripVertical, Trash2 } from "lucide-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +13,7 @@ import {
   type Scene,
   type SceneAudioStatus,
   type SceneMood,
+  type VideoMode,
 } from "@/lib/types";
 
 function audioStatusLabel(status: SceneAudioStatus | undefined): string {
@@ -53,28 +56,68 @@ const ACCENT_PRESETS = [
 interface SceneRowProps {
   index: number;
   scene: Scene;
+  mode: VideoMode;
   canRemove: boolean;
-  onTextChange: (index: number, text: string) => void;
-  onDurationChange: (index: number, duration: number) => void;
-  onMoodChange: (index: number, mood: SceneMood) => void;
-  onVisualQueryChange: (index: number, visualQuery: string) => void;
-  onAccentColorChange: (index: number, accentColor: string) => void;
-  onRemove: (index: number) => void;
+  minDuration: number;
+  maxDuration: number;
+  onTextChange: (sceneId: string, text: string) => void;
+  onDurationChange: (sceneId: string, duration: number) => void;
+  onMoodChange: (sceneId: string, mood: SceneMood) => void;
+  onVisualQueryChange: (sceneId: string, visualQuery: string) => void;
+  onAccentColorChange: (sceneId: string, accentColor: string) => void;
+  onRemove: (sceneId: string) => void;
+  dragHandle?: boolean;
 }
 
 export const SceneRow = memo(function SceneRow({
   index,
   scene,
+  mode,
   canRemove,
+  minDuration,
+  maxDuration,
   onTextChange,
   onDurationChange,
   onMoodChange,
   onVisualQueryChange,
   onAccentColorChange,
   onRemove,
+  dragHandle = false,
 }: SceneRowProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: scene.id, disabled: !dragHandle });
+
+  const style = dragHandle
+    ? {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+      }
+    : undefined;
+
   return (
-    <div className="flex gap-3 rounded-lg border border-border bg-background/50 p-4">
+    <div
+      ref={dragHandle ? setNodeRef : undefined}
+      style={style}
+      className="flex gap-3 rounded-lg border border-border bg-background/50 p-4"
+    >
+      {dragHandle && (
+        <button
+          type="button"
+          className="mt-1 cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+          aria-label="Drag to reorder scene"
+        >
+          <GripVertical className="h-5 w-5" />
+        </button>
+      )}
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
         {index + 1}
       </div>
@@ -93,9 +136,9 @@ export const SceneRow = memo(function SceneRow({
         </div>
         <Textarea
           value={scene.text}
-          onChange={(e) => onTextChange(index, e.target.value)}
+          onChange={(e) => onTextChange(scene.id, e.target.value)}
           placeholder="Scene text..."
-          rows={2}
+          rows={mode === "long" ? 3 : 2}
         />
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
@@ -103,7 +146,7 @@ export const SceneRow = memo(function SceneRow({
             <select
               value={scene.mood}
               onChange={(e) =>
-                onMoodChange(index, e.target.value as SceneMood)
+                onMoodChange(scene.id, e.target.value as SceneMood)
               }
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
             >
@@ -120,7 +163,7 @@ export const SceneRow = memo(function SceneRow({
             </label>
             <Input
               value={scene.visualQuery}
-              onChange={(e) => onVisualQueryChange(index, e.target.value)}
+              onChange={(e) => onVisualQueryChange(scene.id, e.target.value)}
               placeholder="e.g. night city rain"
             />
           </div>
@@ -131,7 +174,7 @@ export const SceneRow = memo(function SceneRow({
             <input
               type="color"
               value={scene.accentColor}
-              onChange={(e) => onAccentColorChange(index, e.target.value)}
+              onChange={(e) => onAccentColorChange(scene.id, e.target.value)}
               className="h-9 w-12 cursor-pointer rounded border border-input bg-transparent"
               aria-label="Accent color"
             />
@@ -139,7 +182,7 @@ export const SceneRow = memo(function SceneRow({
               <button
                 key={color}
                 type="button"
-                onClick={() => onAccentColorChange(index, color)}
+                onClick={() => onAccentColorChange(scene.id, color)}
                 className="h-7 w-7 rounded-full border border-border transition-transform hover:scale-110"
                 style={{ backgroundColor: color }}
                 aria-label={`Use accent ${color}`}
@@ -151,11 +194,14 @@ export const SceneRow = memo(function SceneRow({
           <label className="text-xs text-muted-foreground">Duration (s)</label>
           <Input
             type="number"
-            min={1}
-            max={15}
+            min={minDuration}
+            max={maxDuration}
             value={scene.duration}
             onChange={(e) =>
-              onDurationChange(index, Number(e.target.value) || 1)
+              onDurationChange(
+                scene.id,
+                Math.min(maxDuration, Math.max(minDuration, Number(e.target.value) || minDuration))
+              )
             }
             className="w-20"
           />
@@ -180,7 +226,7 @@ export const SceneRow = memo(function SceneRow({
         variant="ghost"
         size="icon"
         disabled={!canRemove}
-        onClick={() => onRemove(index)}
+        onClick={() => onRemove(scene.id)}
         aria-label={`Remove scene ${index + 1}`}
       >
         <Trash2 className="h-4 w-4" />

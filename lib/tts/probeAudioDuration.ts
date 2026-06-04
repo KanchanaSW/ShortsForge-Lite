@@ -1,3 +1,5 @@
+import type { VideoMode } from "@/lib/types";
+
 export function probeAudioDurationSec(src: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const audio = new Audio();
@@ -30,6 +32,12 @@ export function probeAudioDurationSec(src: string): Promise<number> {
   });
 }
 
-export function durationFromAudioSec(seconds: number): number {
+export function durationFromAudioSec(
+  seconds: number,
+  mode: VideoMode = "short"
+): number {
+  if (mode === "long") {
+    return Math.min(120, Math.max(3, Math.ceil(seconds)));
+  }
   return Math.min(15, Math.max(1, Math.ceil(seconds)));
 }

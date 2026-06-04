@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateScript } from "@/lib/groq";
+import { generateProject } from "@/lib/groq";
 import { generateScriptRequestSchema } from "@/lib/scriptSchema";
 
 export async function POST(request: Request) {
@@ -9,13 +9,13 @@ export async function POST(request: Request) {
 
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Topic is required." },
+        { error: "Invalid request. Check topic and format settings." },
         { status: 400 }
       );
     }
 
-    const script = await generateScript(parsed.data.topic, parsed.data.style);
-    return NextResponse.json(script);
+    const project = await generateProject(parsed.data);
+    return NextResponse.json(project);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Script generation failed.";

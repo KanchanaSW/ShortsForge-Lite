@@ -2,7 +2,8 @@ import {
   durationFromAudioSec,
   probeAudioDurationSec,
 } from "@/lib/tts/probeAudioDuration";
-import type { Scene } from "@/lib/types";
+import { getTextHash8 } from "@/lib/tts/textHashClient";
+import type { Project, Scene, VideoMode } from "@/lib/types";
 
 type SceneTtsResponse =
   | { audioPath: string; cached: boolean }
@@ -12,146 +13,66 @@ export type VoiceoverProgress = {
   done: number;
   total: number;
   index: number;
+  chapterIndex?: number;
+  chapterTotal?: number;
+  sceneIndex?: number;
+  sceneTotal?: number;
 };
 
-export async function generateAllSceneAudio(
-  scenes: Scene[],
-  onProgress: (progress: VoiceoverProgress) => void,
-  signal?: AbortSignal
-): Promise<Scene[]> {
-  const total = scenes.length;
-  const updated = scenes.map((scene) => ({ ...scene }));
-
-  for (let index = 0; index < total; index++) {
-    if (signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-
-    onProgress({ done: index, total, index });
-
-    updated[index] = {
-      ...updated[index],
-      audioStatus: "generating",
-      audioPath: undefined,
-      audioUrl: undefined,
-    };
-
-    const scene = updated[index];
-    const text = scene.text.trim();
-
-    if (!text) {
-      updated[index] = {
-        ...scene,
-        audioStatus: "missing",
-      };
-      onProgress({ done: index + 1, total, index });
-      continue;
-    }
-
-    try {
-      const response = await fetch("/api/tts/scene", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          index,
-          text,
-        }),
-        signal,
-      });
-
-      const data = (await response.json()) as SceneTtsResponse;
-
-      if (!response.ok || !("audioPath" in data)) {
-        const errMsg =
-          "error" in data && typeof data.error === "string"
-            ? data.error
-            : "Voice generation failed";
-        console.warn(`Scene ${index + 1} TTS failed:`, errMsg);
-        updated[index] = {
-          ...scene,
-          audioStatus: "error",
-        };
-        onProgress({ done: index + 1, total, index });
-        continue;
-      }
-
-      const audioUrl = data.audioPath;
-      let duration = scene.duration;
-
-      try {
-        const seconds = await probeAudioDurationSec(audioUrl);
-        duration = durationFromAudioSec(seconds);
-      } catch {
-        // keep manual duration if probe fails
-      }
-
-      updated[index] = {
-        ...scene,
-        audioPath: data.audioPath,
-        audioUrl,
-        audioStatus: "ready",
-        duration,
-      };
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        throw err;
-      }
-      updated[index] = {
-        ...scene,
-        audioStatus: "error",
-      };
-    }
-
-    onProgress({ done: index + 1, total, index });
-  }
-
-  onProgress({ done: total, total, index: Math.max(0, total - 1) });
-  return updated;
+async function shouldSkipScene(scene: Scene): Promise<boolean> {
+  if (scene.audioStatus !== "ready" || !scene.audioPath) return false;
+  const hash = await getTextHash8(scene.text);
+  return scene.audioPath.includes(hash);
 }
 
-export async function generateSceneAudioAt(
-  scenes: Scene[],
-  index: number,
+async function generateSceneTts(
+  scene: Scene,
+  globalIndex: number,
+  mode: VideoMode,
   signal?: AbortSignal
-): Promise<Scene[]> {
-  const copy = scenes.map((s) => ({ ...s }));
-  const scene = copy[index];
+): Promise<Scene> {
   const text = scene.text.trim();
 
-  copy[index] = { ...scene, audioStatus: "generating" };
-
   if (!text) {
-    copy[index] = { ...scene, audioStatus: "missing" };
-    return copy;
+    return { ...scene, audioStatus: "missing" };
+  }
+
+  if (await shouldSkipScene(scene)) {
+    return scene;
   }
 
   try {
     const response = await fetch("/api/tts/scene", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ index, text }),
+      body: JSON.stringify({
+        index: globalIndex,
+        text,
+        sceneId: scene.id,
+      }),
       signal,
     });
 
     const data = (await response.json()) as SceneTtsResponse;
 
     if (!response.ok || !("audioPath" in data)) {
-      copy[index] = { ...scene, audioStatus: "error" };
-      return copy;
+      return { ...scene, audioStatus: "error" };
     }
 
+    const audioUrl = data.audioPath;
     let duration = scene.duration;
+
     try {
-      const seconds = await probeAudioDurationSec(data.audioPath);
-      duration = durationFromAudioSec(seconds);
+      const seconds = await probeAudioDurationSec(audioUrl);
+      duration = durationFromAudioSec(seconds, mode);
     } catch {
-      // keep duration
+      // keep manual duration if probe fails
     }
 
-    copy[index] = {
+    return {
       ...scene,
       audioPath: data.audioPath,
-      audioUrl: data.audioPath,
+      audioUrl,
       audioStatus: "ready",
       duration,
     };
@@ -159,8 +80,81 @@ export async function generateSceneAudioAt(
     if (err instanceof DOMException && err.name === "AbortError") {
       throw err;
     }
-    copy[index] = { ...scene, audioStatus: "error" };
+    return { ...scene, audioStatus: "error" };
+  }
+}
+
+export async function generateAllProjectAudio(
+  project: Project,
+  onProgress: (progress: VoiceoverProgress) => void,
+  signal?: AbortSignal
+): Promise<Project> {
+  const chapterTotal = project.chapters.length;
+  const totalScenes = project.chapters.reduce(
+    (sum, c) => sum + c.scenes.length,
+    0
+  );
+  let done = 0;
+  let globalIndex = 0;
+
+  const updatedChapters = [];
+
+  for (let chapterIndex = 0; chapterIndex < chapterTotal; chapterIndex++) {
+    const chapter = project.chapters[chapterIndex];
+    const sceneTotal = chapter.scenes.length;
+    const updatedScenes: Scene[] = [];
+
+    for (let sceneIndex = 0; sceneIndex < sceneTotal; sceneIndex++) {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+
+      onProgress({
+        done,
+        total: totalScenes,
+        index: globalIndex,
+        chapterIndex: chapterIndex + 1,
+        chapterTotal,
+        sceneIndex: sceneIndex + 1,
+        sceneTotal,
+      });
+
+      let scene = chapter.scenes[sceneIndex];
+
+      if (!(await shouldSkipScene(scene))) {
+        scene = {
+          ...scene,
+          audioStatus: "generating",
+          audioPath: undefined,
+          audioUrl: undefined,
+        };
+      }
+
+      scene = await generateSceneTts(scene, globalIndex, project.mode, signal);
+      updatedScenes.push(scene);
+
+      done += 1;
+      globalIndex += 1;
+    }
+
+    updatedChapters.push({ ...chapter, scenes: updatedScenes });
   }
 
-  return copy;
+  return { ...project, chapters: updatedChapters };
+}
+
+/** @deprecated Use generateAllProjectAudio */
+export async function generateAllSceneAudio(
+  scenes: Scene[],
+  onProgress: (progress: VoiceoverProgress) => void,
+  signal?: AbortSignal,
+  mode: VideoMode = "short"
+): Promise<Scene[]> {
+  const project: Project = {
+    title: "",
+    mode,
+    chapters: [{ id: "main", title: "Main", scenes }],
+  };
+  const result = await generateAllProjectAudio(project, onProgress, signal);
+  return result.chapters[0]?.scenes ?? scenes;
 }

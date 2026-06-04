@@ -1,52 +1,72 @@
 "use client";
 
+import { useMemo } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SceneRow } from "@/components/SceneRow";
-import { DEFAULT_SCENE_VISUALS, type ShortScript } from "@/lib/types";
+import { ChapterSection } from "@/components/ChapterSection";
+import { createEmptyChapter, flattenScenes } from "@/lib/projectUtils";
+import { getTimelineDurationSeconds, buildTimeline } from "@/lib/timelineEngine";
 import { getRawTotalDurationSeconds, getTotalDurationSeconds } from "@/lib/videoUtils";
+import type { Project } from "@/lib/types";
 
 interface ScriptEditorProps {
-  script: ShortScript;
-  onChange: (script: ShortScript) => void;
+  project: Project;
+  onChange: (project: Project) => void;
 }
 
-const MIN_SCENES = 5;
-const MAX_SCENES = 12;
+export function ScriptEditor({ project, onChange }: ScriptEditorProps) {
+  const flatScenes = useMemo(() => flattenScenes(project), [project]);
+  const timeline = useMemo(() => buildTimeline(project), [project]);
+  const totalDuration =
+    project.mode === "short"
+      ? getTotalDurationSeconds(flatScenes)
+      : Math.round(getTimelineDurationSeconds(timeline));
 
-export function ScriptEditor({ script, onChange }: ScriptEditorProps) {
-  const totalDuration = getTotalDurationSeconds(script.scenes);
+  const chapterSensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
-  const updateScene = (index: number, patch: Partial<ShortScript["scenes"][0]>) => {
-    const scenes = script.scenes.map((scene, i) =>
-      i === index ? { ...scene, ...patch } : scene
-    );
-    onChange({ ...script, scenes });
+  const handleChapterDragEnd = (event: DragEndEvent) => {
+    if (project.mode === "short") return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = project.chapters.findIndex((c) => c.id === active.id);
+    const newIndex = project.chapters.findIndex((c) => c.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const chapters = [...project.chapters];
+    const [moved] = chapters.splice(oldIndex, 1);
+    chapters.splice(newIndex, 0, moved);
+    onChange({ ...project, chapters });
   };
 
-  const addScene = () => {
-    if (script.scenes.length >= MAX_SCENES) return;
+  const addChapter = () => {
     onChange({
-      ...script,
-      scenes: [
-        ...script.scenes,
-        {
-          text: "New scene",
-          duration: 3,
-          ...DEFAULT_SCENE_VISUALS,
-        },
-      ],
+      ...project,
+      chapters: [...project.chapters, createEmptyChapter()],
     });
   };
 
-  const removeScene = (index: number) => {
-    if (script.scenes.length <= MIN_SCENES) return;
-    onChange({
-      ...script,
-      scenes: script.scenes.filter((_, i) => i !== index),
-    });
-  };
+  const isShort = project.mode === "short";
 
   return (
     <div className="space-y-6">
@@ -55,62 +75,71 @@ export function ScriptEditor({ script, onChange }: ScriptEditorProps) {
           Title
         </label>
         <Input
-          value={script.title}
-          onChange={(e) => onChange({ ...script, title: e.target.value })}
+          value={project.title}
+          onChange={(e) => onChange({ ...project, title: e.target.value })}
           placeholder="Video title"
         />
       </div>
 
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-medium">Scenes</h3>
+          <h3 className="text-sm font-medium">
+            {isShort ? "Script" : "Chapters"}
+          </h3>
           <p className="text-xs text-muted-foreground">
-            {script.scenes.length} scenes · {totalDuration}s total
-            {getRawTotalDurationSeconds(script.scenes) > totalDuration &&
+            {project.chapters.length} chapter{project.chapters.length !== 1 ? "s" : ""} ·{" "}
+            {flatScenes.length} scene{flatScenes.length !== 1 ? "s" : ""} · ~{totalDuration}s
+            {isShort &&
+              getRawTotalDurationSeconds(flatScenes) > totalDuration &&
               " (scaled to 60s max for Shorts)"}
           </p>
         </div>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={addScene}
-          disabled={script.scenes.length >= MAX_SCENES}
-        >
-          <Plus className="h-4 w-4" />
-          Add Scene
-        </Button>
+        {!isShort && (
+          <Button type="button" variant="secondary" size="sm" onClick={addChapter}>
+            <Plus className="h-4 w-4" />
+            Add Chapter
+          </Button>
+        )}
       </div>
 
-      <div className="space-y-3">
-        {script.scenes.map((scene, index) => (
-          <SceneRow
-            key={index}
-            index={index}
-            scene={scene}
-            canRemove={script.scenes.length > MIN_SCENES}
-            onTextChange={(i, text) =>
-              updateScene(i, {
-                text,
-                audioPath: undefined,
-                audioUrl: undefined,
-                audioStatus: undefined,
-              })
-            }
-            onDurationChange={(i, duration) =>
-              updateScene(i, { duration: Math.min(15, Math.max(1, duration)) })
-            }
-            onMoodChange={(i, mood) => updateScene(i, { mood })}
-            onVisualQueryChange={(i, visualQuery) =>
-              updateScene(i, { visualQuery, videoUrl: undefined })
-            }
-            onAccentColorChange={(i, accentColor) =>
-              updateScene(i, { accentColor })
-            }
-            onRemove={removeScene}
+      {isShort ? (
+        project.chapters.map((chapter, chapterIndex) => (
+          <ChapterSection
+            key={chapter.id}
+            chapter={chapter}
+            chapterIndex={chapterIndex}
+            project={project}
+            onChange={onChange}
+            canRemoveChapter={false}
+            canAddChapter={false}
           />
-        ))}
-      </div>
+        ))
+      ) : (
+        <DndContext
+          sensors={chapterSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleChapterDragEnd}
+        >
+          <SortableContext
+            items={project.chapters.map((c) => c.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="space-y-6">
+              {project.chapters.map((chapter, chapterIndex) => (
+                <ChapterSection
+                  key={chapter.id}
+                  chapter={chapter}
+                  chapterIndex={chapterIndex}
+                  project={project}
+                  onChange={onChange}
+                  canRemoveChapter={project.chapters.length > 1}
+                  canAddChapter
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      )}
     </div>
   );
 }

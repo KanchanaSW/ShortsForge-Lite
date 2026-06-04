@@ -1,7 +1,7 @@
-import { createHash } from "crypto";
 import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from "path";
+import { getTextHash8, normalizeTtsText } from "@/lib/tts/textHash";
 import { DEFAULT_VOICE, getVoiceForScene } from "@/lib/tts/voices";
 
 export type TtsErrorCode =
@@ -27,15 +27,6 @@ const AUDIO_DIR = path.join(process.cwd(), "public", "audio");
 export const INSTALL_HINT =
   "On macOS: brew install pipx && pipx install edge-tts && pipx ensurepath (then restart the terminal). Or use a project venv — see README.";
 
-function normalizeText(text: string): string {
-  return text.trim().replace(/\s+/g, " ");
-}
-
-export function getTextHash8(text: string): string {
-  const normalized = normalizeText(text);
-  return createHash("sha256").update(normalized).digest("hex").slice(0, 8);
-}
-
 export function getSceneAudioFilename(
   index: number,
   text: string,
@@ -43,6 +34,16 @@ export function getSceneAudioFilename(
 ): string {
   const voiceKey = voice.replace(/[^a-z0-9]/gi, "").slice(-12).toLowerCase();
   return `scene-${index}-${getTextHash8(text)}-${voiceKey}.mp3`;
+}
+
+export function getSceneAudioFilenameById(
+  sceneId: string,
+  text: string,
+  voice: string = DEFAULT_VOICE
+): string {
+  const voiceKey = voice.replace(/[^a-z0-9]/gi, "").slice(-12).toLowerCase();
+  const idKey = sceneId.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase();
+  return `scene-${idKey}-${getTextHash8(text)}-${voiceKey}.mp3`;
 }
 
 export function getPublicAudioPath(filename: string): string {
@@ -208,6 +209,7 @@ function runEdgeTts(
 
 export type GenerateSceneAudioOptions = {
   voice?: string;
+  sceneId?: string;
 };
 
 export type GenerateSceneAudioResult = {
@@ -220,7 +222,7 @@ export async function generateSceneAudio(
   index: number,
   options?: GenerateSceneAudioOptions
 ): Promise<GenerateSceneAudioResult> {
-  const normalized = normalizeText(text);
+  const normalized = normalizeTtsText(text);
   if (!normalized) {
     throw new TtsError("INVALID_TEXT", "Scene text is empty.");
   }
@@ -234,7 +236,9 @@ export async function generateSceneAudio(
 
   await ensureAudioDir();
 
-  const filename = getSceneAudioFilename(index, truncated, voice);
+  const filename = options?.sceneId
+    ? getSceneAudioFilenameById(options.sceneId, truncated, voice)
+    : getSceneAudioFilename(index, truncated, voice);
   const absolutePath = getAbsoluteAudioPath(filename);
   const publicPath = getPublicAudioPath(filename);
 

@@ -3,9 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RotateCcw, Sparkles, Video } from "lucide-react";
+import { LongFormOptions } from "@/components/LongFormOptions";
 import { ScriptEditor } from "@/components/ScriptEditor";
+import { VideoFormatSelector } from "@/components/VideoFormatSelector";
 import { VoiceoverStatus } from "@/components/VoiceoverStatus";
-import { RenderProgress } from "@/components/RenderProgress";
+import {
+  RenderProgress,
+  type PipelineStep,
+} from "@/components/RenderProgress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,26 +19,39 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { prefetchStockVideos } from "@/lib/prefetchStockVideos";
-import { generateAllSceneAudio } from "@/lib/tts/generateAllSceneAudio";
-import { RenderError, renderShortVideo } from "@/lib/renderVideo";
+import { allScenesHaveAudio, flattenScenes, getSceneCount } from "@/lib/projectUtils";
+import { prefetchProjectStockVideos } from "@/lib/prefetchStockVideos";
+import { generateAllProjectAudio } from "@/lib/tts/generateAllSceneAudio";
+import { RenderError, renderProject } from "@/lib/renderVideo";
 import {
   clearProject,
-  loadScript,
+  loadMode,
+  loadProject,
   loadTopic,
-  saveScript,
+  saveMode,
+  saveProject,
+  saveRenderMeta,
   saveTopic,
   saveVideoBlobUrl,
 } from "@/lib/storage";
-import { SCRIPT_STYLES, type ScriptStyle, type ShortScript } from "@/lib/types";
+import { buildTimeline, getTimelineDurationSeconds } from "@/lib/timelineEngine";
+import {
+  SCRIPT_STYLES,
+  type LongContentStyle,
+  type Project,
+  type ScriptStyle,
+  type TargetDuration,
+  type VideoMode,
+} from "@/lib/types";
+import { getModeLabel, getResolutionLabel } from "@/lib/videoConfig";
 import { getVideoFilename } from "@/lib/videoUtils";
 
 type PagePhase = "input" | "editor" | "rendering";
-type PipelineStage = "voice" | "visuals" | "encode";
 
-const VOICE_WEIGHT = 0.3;
-const VISUALS_WEIGHT = 0.2;
-const ENCODE_WEIGHT = 0.5;
+const VOICE_WEIGHT = 0.25;
+const VISUALS_WEIGHT = 0.15;
+const TIMELINE_WEIGHT = 0.05;
+const ENCODE_WEIGHT = 0.55;
 
 export default function CreatePage() {
   const router = useRouter();
@@ -41,30 +59,47 @@ export default function CreatePage() {
 
   const [phase, setPhase] = useState<PagePhase>("input");
   const [topic, setTopic] = useState("");
+  const [mode, setMode] = useState<VideoMode>("short");
   const [style, setStyle] = useState<ScriptStyle>("motivational");
-  const [script, setScript] = useState<ShortScript | null>(null);
+  const [targetDuration, setTargetDuration] = useState<TargetDuration>(5);
+  const [contentStyle, setContentStyle] = useState<LongContentStyle>("educational");
+  const [showTableOfContents, setShowTableOfContents] = useState(false);
+  const [project, setProject] = useState<Project | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderWarning, setRenderWarning] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
-  const [pipelineStage, setPipelineStage] = useState<PipelineStage>("voice");
+  const [pipelineStep, setPipelineStep] = useState<PipelineStep>("voice");
   const [pipelineDetail, setPipelineDetail] = useState("");
 
   useEffect(() => {
     const savedTopic = loadTopic();
-    const savedScript = loadScript();
+    const savedProject = loadProject();
+    const savedMode = loadMode();
     if (savedTopic) setTopic(savedTopic);
-    if (savedScript) {
-      setScript(savedScript);
+    setMode(savedMode);
+    if (savedProject) {
+      setProject(savedProject);
+      setMode(savedProject.mode);
+      if (savedProject.targetDuration) setTargetDuration(savedProject.targetDuration);
+      if (savedProject.contentStyle) setContentStyle(savedProject.contentStyle);
+      if (savedProject.showTableOfContents !== undefined) {
+        setShowTableOfContents(savedProject.showTableOfContents);
+      }
       setPhase("editor");
     }
   }, []);
 
-  const handleScriptChange = useCallback((updated: ShortScript) => {
-    setScript(updated);
-    saveScript(updated);
+  const handleProjectChange = useCallback((updated: Project) => {
+    setProject(updated);
+    saveProject(updated);
   }, []);
+
+  const handleModeChange = (newMode: VideoMode) => {
+    setMode(newMode);
+    saveMode(newMode);
+  };
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
@@ -77,22 +112,33 @@ export default function CreatePage() {
     saveTopic(topic.trim());
 
     try {
+      const body =
+        mode === "short"
+          ? { topic: topic.trim(), mode: "short" as const, style }
+          : {
+              topic: topic.trim(),
+              mode: "long" as const,
+              targetDuration,
+              contentStyle,
+              showTableOfContents,
+            };
+
       const response = await fetch("/api/generate-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: topic.trim(), style }),
+        body: JSON.stringify(body),
       });
 
-      const data = (await response.json()) as ShortScript | { error: string };
+      const data = (await response.json()) as Project | { error: string };
 
       if (!response.ok) {
         setGenerateError("error" in data ? data.error : "Generation failed.");
         return;
       }
 
-      const generated = data as ShortScript;
-      setScript(generated);
-      saveScript(generated);
+      const generated = data as Project;
+      setProject(generated);
+      saveProject(generated);
       setPhase("editor");
     } catch {
       setGenerateError("Script generation failed. Check your connection and try again.");
@@ -102,12 +148,23 @@ export default function CreatePage() {
   };
 
   const handleGenerateVideo = async () => {
-    if (!script) return;
+    if (!project) return;
+
+    const timeline = buildTimeline(project);
+    const durationMinutes = getTimelineDurationSeconds(timeline) / 60;
+    const isLongRender = durationMinutes >= 15;
+
+    if (isLongRender) {
+      setRenderWarning(
+        `This video is ~${Math.round(durationMinutes)} minutes. Rendering may take 15–30+ minutes in your browser.`
+      );
+    } else {
+      setRenderWarning(null);
+    }
 
     setRenderError(null);
-    setRenderWarning(null);
     setRenderProgress(0);
-    setPipelineStage("voice");
+    setPipelineStep("voice");
     setPipelineDetail("");
     setPhase("rendering");
 
@@ -115,46 +172,48 @@ export default function CreatePage() {
     abortRef.current = controller;
 
     try {
-      let workingScript = script;
+      let workingProject = project;
 
       const ttsStatus = await fetch("/api/tts/status").then((r) =>
         r.json()
       ) as { available: boolean };
 
       if (ttsStatus.available) {
-        const allVoiceReady = workingScript.scenes.every(
-          (s) =>
-            !s.text.trim() ||
-            (s.audioStatus === "ready" && Boolean(s.audioPath))
-        );
+        if (!allScenesHaveAudio(workingProject)) {
+          setPipelineStep("voice");
+          workingProject = await generateAllProjectAudio(
+            workingProject,
+            ({ done, total, chapterIndex, chapterTotal, sceneIndex, sceneTotal }) => {
+              const pct =
+                total === 0 ? 0 : Math.round((done / total) * VOICE_WEIGHT * 100);
+              setRenderProgress(pct);
+              if (chapterTotal && chapterIndex && sceneTotal && sceneIndex) {
+                setPipelineDetail(
+                  `Chapter ${chapterIndex} / ${chapterTotal} · Scene ${sceneIndex} / ${sceneTotal}`
+                );
+              } else {
+                setPipelineDetail(
+                  total === 0
+                    ? ""
+                    : `Generating voice ${Math.min(done + 1, total)}/${total}...`
+                );
+              }
+            },
+            controller.signal
+          );
 
-        if (!allVoiceReady) {
-          setPipelineStage("voice");
-          const scenesWithAudio = await generateAllSceneAudio(
-          workingScript.scenes,
-          ({ done, total }) => {
-            const pct =
-              total === 0 ? 0 : Math.round((done / total) * VOICE_WEIGHT * 100);
-            setRenderProgress(pct);
-            setPipelineDetail(
-              total === 0
-                ? ""
-                : `Generating voice ${Math.min(done + 1, total)}/${total}...`
-            );
-          },
-          controller.signal
-        );
+          setProject(workingProject);
+          saveProject(workingProject);
 
-          workingScript = { ...workingScript, scenes: scenesWithAudio };
-          setScript(workingScript);
-          saveScript(workingScript);
-
-          const voiceFailures = scenesWithAudio.filter(
+          const voiceFailures = flattenScenes(workingProject).filter(
             (s) => s.audioStatus === "error"
           ).length;
           if (voiceFailures > 0) {
             setRenderWarning(
-              `${voiceFailures} scene(s) could not generate voice — continuing with partial or silent audio.`
+              (prev) =>
+                prev
+                  ? `${prev} ${voiceFailures} scene(s) could not generate voice.`
+                  : `${voiceFailures} scene(s) could not generate voice — continuing with partial or silent audio.`
             );
           }
         } else {
@@ -164,10 +223,10 @@ export default function CreatePage() {
 
       if (controller.signal.aborted) return;
 
-      setPipelineStage("visuals");
-      setPipelineDetail("");
-      const scenesWithVisuals = await prefetchStockVideos(
-        workingScript.scenes,
+      setPipelineStep("visuals");
+      setPipelineDetail("Fetching stock footage...");
+      workingProject = await prefetchProjectStockVideos(
+        workingProject,
         (done, total) => {
           const base = VOICE_WEIGHT * 100;
           const span = VISUALS_WEIGHT * 100;
@@ -175,22 +234,28 @@ export default function CreatePage() {
             setRenderProgress(Math.round(base + span));
             return;
           }
-          setRenderProgress(
-            Math.round(base + (done / total) * span)
-          );
+          setRenderProgress(Math.round(base + (done / total) * span));
         },
         controller.signal
       );
 
       if (controller.signal.aborted) return;
 
-      setPipelineStage("encode");
-      setPipelineDetail("");
-      setRenderProgress(Math.round(VOICE_WEIGHT * 100 + VISUALS_WEIGHT * 100));
+      setPipelineStep("timeline");
+      setPipelineDetail("Calculating timeline...");
+      buildTimeline(workingProject);
+      setRenderProgress(
+        Math.round((VOICE_WEIGHT + VISUALS_WEIGHT + TIMELINE_WEIGHT) * 100)
+      );
 
-      const encodeBase = (VOICE_WEIGHT + VISUALS_WEIGHT) * 100;
-      const { blob, usedSilentFallback } = await renderShortVideo(
-        { ...workingScript, scenes: scenesWithVisuals },
+      if (controller.signal.aborted) return;
+
+      setPipelineStep("encode");
+      setPipelineDetail("Encoding MP4...");
+      const encodeBase = (VOICE_WEIGHT + VISUALS_WEIGHT + TIMELINE_WEIGHT) * 100;
+
+      const { blob, usedSilentFallback } = await renderProject(
+        workingProject,
         (pct) => {
           setRenderProgress(
             Math.round(encodeBase + (pct / 100) * ENCODE_WEIGHT * 100)
@@ -208,9 +273,22 @@ export default function CreatePage() {
         );
       }
 
+      setPipelineStep("ready");
+      setRenderProgress(100);
+
       const blobUrl = URL.createObjectURL(blob);
-      const filename = getVideoFilename(workingScript);
+      const filename = getVideoFilename(workingProject);
       saveVideoBlobUrl(blobUrl, filename);
+
+      const finalTimeline = buildTimeline(workingProject);
+      saveRenderMeta({
+        mode: workingProject.mode,
+        resolution: getResolutionLabel(workingProject.mode),
+        durationSeconds: Math.round(getTimelineDurationSeconds(finalTimeline)),
+        chapterCount: workingProject.chapters.length,
+        sceneCount: getSceneCount(workingProject),
+      });
+
       router.push("/preview");
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -232,7 +310,7 @@ export default function CreatePage() {
     abortRef.current?.abort();
     setPhase("editor");
     setRenderProgress(0);
-    setPipelineStage("voice");
+    setPipelineStep("voice");
     setPipelineDetail("");
   };
 
@@ -240,26 +318,39 @@ export default function CreatePage() {
     abortRef.current?.abort();
     clearProject();
     setTopic("");
+    setMode("short");
     setStyle("motivational");
-    setScript(null);
+    setTargetDuration(5);
+    setContentStyle("educational");
+    setShowTableOfContents(false);
+    setProject(null);
     setPhase("input");
     setGenerateError(null);
     setRenderError(null);
     setRenderWarning(null);
     setRenderProgress(0);
-    setPipelineStage("voice");
+    setPipelineStep("voice");
     setPipelineDetail("");
     setIsGenerating(false);
   };
 
-  const hasProject = Boolean(script || topic.trim());
+  const hasProject = Boolean(project || topic.trim());
 
   const pipelineLabel =
-    pipelineStage === "voice"
-      ? pipelineDetail || "Generating voiceover..."
-      : pipelineStage === "visuals"
+    pipelineDetail ||
+    (pipelineStep === "voice"
+      ? "Generating voiceover..."
+      : pipelineStep === "visuals"
         ? "Fetching visuals..."
-        : "Rendering video...";
+        : pipelineStep === "timeline"
+          ? "Building timeline..."
+          : pipelineStep === "encode"
+            ? "Rendering video..."
+            : "Ready");
+
+  const estimatedMinutes = project
+    ? getTimelineDurationSeconds(buildTimeline(project)) / 60
+    : 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-12">
@@ -269,14 +360,14 @@ export default function CreatePage() {
           ShortsForge Lite
         </div>
         <h1 className="text-3xl font-bold tracking-tight">
-          Create YouTube Shorts
+          Create AI Videos
         </h1>
         <p className="text-muted-foreground">
-          Enter a topic, generate a script, and create your short in one click.
+          Generate YouTube Shorts or long-form videos from a topic.
         </p>
       </header>
 
-      {(phase === "input" || !script) && (
+      {(phase === "input" || !project) && (
         <Card>
           <CardHeader>
             <CardTitle>Step 1 — Topic</CardTitle>
@@ -292,28 +383,46 @@ export default function CreatePage() {
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Style (optional)</label>
-              <div className="flex flex-wrap gap-2">
-                {SCRIPT_STYLES.map((option) => (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    variant={style === option.value ? "default" : "secondary"}
-                    size="sm"
-                    onClick={() => setStyle(option.value)}
-                    disabled={isGenerating}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
+            <VideoFormatSelector
+              mode={mode}
+              onChange={handleModeChange}
+              disabled={isGenerating}
+            />
+
+            {mode === "short" ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Style (optional)</label>
+                <div className="flex flex-wrap gap-2">
+                  {SCRIPT_STYLES.map((option) => (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      variant={style === option.value ? "default" : "secondary"}
+                      size="sm"
+                      onClick={() => setStyle(option.value)}
+                      disabled={isGenerating}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+                {style === "storytelling" && (
+                  <p className="text-xs text-muted-foreground">
+                    Denser narrative, still under 60 seconds.
+                  </p>
+                )}
               </div>
-              {style === "storytelling" && (
-                <p className="text-xs text-muted-foreground">
-                  Denser narrative, still under 60 seconds.
-                </p>
-              )}
-            </div>
+            ) : (
+              <LongFormOptions
+                targetDuration={targetDuration}
+                contentStyle={contentStyle}
+                showTableOfContents={showTableOfContents}
+                onTargetDurationChange={setTargetDuration}
+                onContentStyleChange={setContentStyle}
+                onTableOfContentsChange={setShowTableOfContents}
+                disabled={isGenerating}
+              />
+            )}
 
             {generateError && (
               <p className="text-sm text-red-400">{generateError}</p>
@@ -347,7 +456,7 @@ export default function CreatePage() {
         </Card>
       )}
 
-      {script && phase !== "rendering" && (
+      {project && phase !== "rendering" && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
             <CardTitle>Step 2 — Edit &amp; Create</CardTitle>
@@ -362,9 +471,21 @@ export default function CreatePage() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-6">
-            <ScriptEditor script={script} onChange={handleScriptChange} />
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full bg-muted px-2 py-1">
+                {getModeLabel(project.mode)}
+              </span>
+              <span className="rounded-full bg-muted px-2 py-1">
+                {getResolutionLabel(project.mode)}
+              </span>
+              <span className="rounded-full bg-muted px-2 py-1">
+                ~{Math.round(estimatedMinutes * 10) / 10} min
+              </span>
+            </div>
 
-            <VoiceoverStatus script={script} />
+            <ScriptEditor project={project} onChange={handleProjectChange} />
+
+            <VoiceoverStatus project={project} />
 
             {renderWarning && (
               <p className="text-sm text-amber-400">{renderWarning}</p>
@@ -393,8 +514,10 @@ export default function CreatePage() {
       {phase === "rendering" && (
         <RenderProgress
           progress={renderProgress}
+          currentStep={pipelineStep}
           statusLabel={pipelineLabel}
           onCancel={handleCancelRender}
+          longRenderWarning={estimatedMinutes >= 15}
         />
       )}
     </div>

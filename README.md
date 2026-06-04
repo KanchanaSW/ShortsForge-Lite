@@ -1,16 +1,17 @@
 # ShortsForge Lite
 
-Generate YouTube Shorts videos from a topic — no auth, no database, runs locally.
+Generate YouTube Shorts and long-form videos from a topic — no auth, no database, runs locally.
 
 ## Features
 
-- Enter a topic and optional style (motivational, facts, storytelling)
-- AI script generation via Groq with **per-scene visuals** (mood, stock search phrase, accent color)
-- Editable scene-by-scene script editor including visual metadata
-- **Story-matched backgrounds** — each scene uses its own mood gradient or optional Pexels stock video
-- **Free voiceover** per scene via Edge TTS (`edge-tts` CLI)
-- Browser-based Remotion rendering (1080×1920 vertical MP4) with synced audio
-- Download rendered video locally
+- **YouTube Shorts** — vertical 1080×1920, 30–60 seconds, viral pacing
+- **Long-form videos** — landscape 1920×1080, 3–20 minutes, chapter-based structure
+- AI script generation via Groq with per-scene visuals (mood, stock search phrase, accent color)
+- Chapter/scene script editor with drag-and-drop reorder
+- **Story-matched backgrounds** — Pexels stock video (portrait or landscape) or mood gradient fallback
+- **Free voiceover** per scene via Edge TTS with text-hash caching
+- Browser-based Remotion rendering with synced audio
+- Download rendered MP4 locally
 
 ## Requirements
 
@@ -18,7 +19,7 @@ Generate YouTube Shorts videos from a topic — no auth, no database, runs local
 - Chrome or Edge (WebCodecs required for video rendering)
 - [Groq API key](https://console.groq.com/)
 - Optional: [Pexels API key](https://www.pexels.com/api/) for stock video backgrounds
-- Optional: [edge-tts](https://pypi.org/project/edge-tts/) for voiceover (see **Voiceover setup** below)
+- Optional: [edge-tts](https://pypi.org/project/edge-tts/) for voiceover
 
 ## Setup
 
@@ -33,18 +34,29 @@ Open [http://localhost:3000/create](http://localhost:3000/create).
 
 ## Usage
 
-1. Enter a topic and click **Generate Script**
-2. Edit scenes, title, mood, visual search phrases, and accent colors
-3. Click **Generate Video** — voiceover, stock visuals (if configured), and MP4 render run automatically
-4. Preview and **Download MP4** on the preview page
+1. Choose **YouTube Short** or **Long-form Video**
+2. Enter a topic and configure style/duration options
+3. Click **Generate Script** — edit chapters and scenes in the editor
+4. Click **Generate Video** — voiceover, stock visuals, and MP4 render run automatically
+5. Preview and **Download MP4** on the preview page
 
-Without `edge-tts`, you can still render **silent** video. A browser-only voice preview is available when the CLI is missing.
+### Shorts mode
+
+- Style: motivational, facts, or storytelling
+- 6–12 scenes, max 60 seconds
+- Vertical TikTok-style captions
+
+### Long-form mode
+
+- Target duration: 3, 5, 10, 15, or 20 minutes
+- Content style: educational, documentary, storytelling, motivational, or explainer
+- 8-chapter structure (Hook → Intro → Parts 1–4 → Conclusion → CTA)
+- Optional table of contents intro
+- Landscape lower-third captions with chapter transitions
+
+Long videos (15+ min) may take 15–30+ minutes to render in the browser. Keep the tab open.
 
 ## Voiceover setup (macOS / PEP 668)
-
-Homebrew Python often rejects `pip install edge-tts` with **externally-managed-environment**. Use one of these instead:
-
-### Recommended: pipx
 
 ```bash
 brew install pipx
@@ -52,42 +64,7 @@ pipx install edge-tts
 pipx ensurepath
 ```
 
-Close and reopen your terminal (or run `source ~/.zshrc`), then verify:
-
-```bash
-edge-tts --version
-```
-
-Restart `npm run dev` so Next.js picks up the updated PATH.
-
-### Alternative: project virtualenv
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install edge-tts
-edge-tts --version
-```
-
-The app also checks `.venv/bin/edge-tts` automatically. Run `npm run dev` from the project root.
-
-### Custom binary path
-
-If `edge-tts` is installed elsewhere, set in `.env.local`:
-
-```bash
-EDGE_TTS_PATH=/full/path/to/edge-tts
-```
-
-## Story-matched visuals
-
-Each scene includes:
-
-- **mood** — drives animated gradient motion when no stock video is available
-- **visualQuery** — 2–5 word phrase sent to Pexels when `PEXELS_API_KEY` is set
-- **accentColor** — hex color harmonizing with the scene mood
-
-If `PEXELS_API_KEY` is missing or a fetch fails for a scene, that scene falls back to a mood-based gradient automatically. Rendering is never blocked by missing stock video.
+Restart your terminal, verify with `edge-tts --version`, then restart `npm run dev`.
 
 ## Tech Stack
 
@@ -100,8 +77,7 @@ If `PEXELS_API_KEY` is missing or a fetch fails for a scene, that scene falls ba
 
 ## Notes
 
-- Script and topic are saved in `localStorage` (visual fields included; `videoUrl` and audio fields are not persisted)
-- Generated MP3s are written to `public/audio/` (gitignored)
-- Rendered video blob URL is stored in `sessionStorage` for preview
-- Video rendering is experimental (`@remotion/web-renderer`) — best in Chrome/Edge
-- Stock video uses `<Video>` from `@remotion/media`; if a clip fails to load, the scene uses gradient fallback
+- Project data saved in `localStorage` (v2 format with chapters; v1 scripts auto-migrate)
+- Generated MP3s written to `public/audio/` (gitignored)
+- Rendered video blob URL stored in `sessionStorage` for preview
+- Video rendering is experimental — best in Chrome/Edge

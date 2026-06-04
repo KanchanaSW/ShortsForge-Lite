@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { flattenScenes } from "@/lib/projectUtils";
 import { previewTextWithWebSpeech } from "@/lib/tts/webSpeechPreview";
-import type { ShortScript } from "@/lib/types";
+import type { Project } from "@/lib/types";
 
 interface VoiceoverStatusProps {
-  script: ShortScript;
+  project: Project;
 }
 
-export function VoiceoverStatus({ script }: VoiceoverStatusProps) {
+export function VoiceoverStatus({ project }: VoiceoverStatusProps) {
   const [cliAvailable, setCliAvailable] = useState<boolean | null>(null);
   const [installHint, setInstallHint] = useState("");
 
@@ -31,7 +32,8 @@ export function VoiceoverStatus({ script }: VoiceoverStatusProps) {
     };
   }, []);
 
-  const readyCount = script.scenes.filter((s) => s.audioStatus === "ready").length;
+  const scenes = flattenScenes(project);
+  const readyCount = scenes.filter((s) => s.audioStatus === "ready").length;
 
   if (cliAvailable === false) {
     return (
@@ -44,7 +46,7 @@ export function VoiceoverStatus({ script }: VoiceoverStatusProps) {
           size="sm"
           className="mt-2"
           onClick={() => {
-            const first = script.scenes.find((s) => s.text.trim());
+            const first = scenes.find((s) => s.text.trim());
             if (first) previewTextWithWebSpeech(first.text);
           }}
         >
@@ -60,7 +62,7 @@ export function VoiceoverStatus({ script }: VoiceoverStatusProps) {
     <p className="text-xs text-muted-foreground">
       Voiceover via Edge TTS
       {readyCount > 0
-        ? ` — ${readyCount}/${script.scenes.length} scenes cached`
+        ? ` — ${readyCount}/${scenes.length} scenes cached`
         : " — generated automatically when you create the video"}
     </p>
   );

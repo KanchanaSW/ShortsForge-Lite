@@ -31,8 +31,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const { index, text } = parsed.data;
-    const result = await generateSceneAudio(text, index);
+    const { index, text, sceneId } = parsed.data;
+    const result = await generateSceneAudio(text, index, { sceneId });
 
     return NextResponse.json(result);
   } catch (error) {

@@ -1,4 +1,5 @@
 import { DEFAULT_SCENE_VISUALS, SCENE_MOODS, type Scene } from "@/lib/types";
+import { generateId } from "@/lib/id";
 
 function isValidMood(value: unknown): value is Scene["mood"] {
   return (
@@ -11,7 +12,9 @@ function isValidHexColor(value: unknown): boolean {
   return typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value);
 }
 
-export function normalizeScene(partial: Partial<Scene> & { text: string; duration: number }): Scene {
+export function normalizeScene(
+  partial: Partial<Scene> & { text: string; duration: number }
+): Scene {
   const {
     videoUrl: _v,
     audioPath: _a,
@@ -30,6 +33,8 @@ export function normalizeScene(partial: Partial<Scene> & { text: string; duratio
       : DEFAULT_SCENE_VISUALS.accentColor;
 
   return {
+    id: typeof rest.id === "string" && rest.id.length > 0 ? rest.id : generateId(),
+    heading: typeof rest.heading === "string" ? rest.heading : undefined,
     text: rest.text,
     duration: rest.duration,
     mood: isValidMood(rest.mood) ? rest.mood : DEFAULT_SCENE_VISUALS.mood,
@@ -41,6 +46,8 @@ export function normalizeScene(partial: Partial<Scene> & { text: string; duratio
   };
 }
 
-export function normalizeScript(scenes: Array<Partial<Scene> & { text: string; duration: number }>): Scene[] {
+export function normalizeScript(
+  scenes: Array<Partial<Scene> & { text: string; duration: number }>
+): Scene[] {
   return scenes.map(normalizeScene);
 }
